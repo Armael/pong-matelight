@@ -125,9 +125,9 @@ let draw conn st =
 
 let apply_keys events st =
   let p1_up st = { st with p1 = max 0 (st.p1 - 1) } in
-  let p1_down st = { st with p1 = min (Screen.nb_lines - 1) (st.p1 + 1) } in
+  let p1_down st = { st with p1 = min (Screen.nb_lines - player_height) (st.p1 + 1) } in
   let p2_up st = { st with p2 = max 0 (st.p2 - 1) } in
-  let p2_down st = { st with p2 = min (Screen.nb_lines - 1) (st.p2 + 1) } in
+  let p2_down st = { st with p2 = min (Screen.nb_lines - player_height) (st.p2 + 1) } in
   Lwt_stream.get_available events |> List.fold_left (fun st ev ->
     match ev with
     | `Up1 -> p1_up st
