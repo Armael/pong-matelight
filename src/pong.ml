@@ -5,11 +5,14 @@ let () = Random.self_init ()
 type state = {
   ball_x : float;
   ball_y : float;
-  ball_vx : float;
-  ball_vy : float;
+  ball_vr : float;
+  ball_vtheta : float;
 
   p1 : int;
   p2 : int;
+
+  (* oldest first *)
+  trail : (float * float) list;
 }
 
 let ncol = float_of_int Screen.nb_columns
@@ -18,80 +21,115 @@ let nlines = float_of_int Screen.nb_lines
 let ball_speed = 0.5
 let player_width = 2.
 let player_height = 6
+let trail_length = 8
+let trail_colors = [
+  Screen.rgb ~r:255 ~g:0 ~b:0;
+  Screen.rgb ~r:255 ~g:0 ~b:0;
+  Screen.rgb ~r:255 ~g:144 ~b:0;
+  Screen.rgb ~r:255 ~g:144 ~b:0;
+  Screen.rgb ~r:255 ~g:230 ~b:0;
+  Screen.rgb ~r:255 ~g:230 ~b:0;
+  Screen.rgb ~r:255 ~g:230 ~b:130;
+  Screen.rgb ~r:255 ~g:230 ~b:130;
+]
 
-(* between -1 and -0.1, or 0.5 and 1 *)
-let random_vx () =
-  let v = Random.float 0.5 +. 0.5 in
-  if Random.bool () then v else -. v
+let pi = 3.1415926535
 
-let random_vy () =
-  Random.float 1.
+let random_vtheta () =
+  Random.float (2./.8.) +. (1./.8.)
+  +. (float_of_int (Random.int 3)) *. pi
 
 let st0 () = {
   ball_x = ncol /. 2.;
   ball_y = nlines /. 2.;
-  ball_vx = ball_speed *. random_vx ();
-  ball_vy = ball_speed *. random_vy ();
-  p1 = 0;
-  p2 = 0;
+  ball_vr = ball_speed;
+  ball_vtheta = random_vtheta ();
+  p1 = (Screen.nb_lines - player_height) / 2;
+  p2 = (Screen.nb_lines - player_height) / 2;
+  trail = [];
 }
 
+let upd_trail x y trail =
+  if List.length trail = trail_length then
+    List.tl trail @ [(x, y)]
+  else
+    trail @ [(x, y)]
+
 let game_step st =
-  let x' = st.ball_x +. st.ball_vx in
-  let y' = st.ball_y +. st.ball_vy in
+  let st = { st with trail = upd_trail st.ball_x st.ball_y st.trail } in
+  let x' = st.ball_x +. st.ball_vr *. cos st.ball_vtheta in
+  let y' = st.ball_y +. st.ball_vr *. sin st.ball_vtheta in
 
   let st =
     if y' < 0. then
       (* bounce top *)
       { st with ball_y = -. y';
-                ball_vy = -. st.ball_vy; }
+                ball_vtheta = pi -. st.ball_vtheta;
+                ball_vr = -. st.ball_vr; }
     else if y' >= nlines then
       (* bounce bottom *)
       { st with ball_y = 2. *. nlines -. y' -. 1.;
-                ball_vy = -. st.ball_vy }
+                ball_vtheta = pi -. st.ball_vtheta;
+                ball_vr = -. st.ball_vr; }
     else
       (* continue *)
       { st with ball_y = y' }
   in
 
-  let st =
-    if x' < player_width then begin
-      (* left wall collision *)
-      if float_of_int st.p1 <= st.ball_y &&
-         st.ball_y <= float_of_int (st.p1 + player_height)
-      then
-        (* bounce *)
-        { st with ball_x = 2. *. player_width -. x';
-                  ball_vx = -. st.ball_vx }
-      else
-        (* P1 lost; reset the ball *)
-        { (st0 ()) with p1 = st.p1; p2 = st.p2 }
-    end else if x' >= ncol -. player_width then begin
-      (* right wall collision *)
-      if float_of_int st.p2 <= st.ball_y &&
-         st.ball_y <= float_of_int (st.p2 + player_height)
-      then
-        (* bounce *)
-        { st with ball_x = 2. *. (ncol -. player_width) -. x' -. 1.;
-                  ball_vx = -. st.ball_vx }
-      else
-        (* P2 lost; reset the ball *)
-        { (st0 ()) with p1 = st.p1; p2 = st.p2 }
-    end else
-      (* continue *)
-      { st with ball_x = x' }
+  let deviation theta diff =
+    let diff_max = float_of_int player_height in
+    let diff_ratio = diff /. diff_max in
+    if theta > 0. then
+      min (theta +. diff_ratio *. pi /. 8.) (2. *. pi /. 6.)
+    else
+      max (theta -. diff_ratio *. pi /. 8.) (- 2. *. pi /. 6.)
   in
-  st
+
+  let st, reset =
+    if x' < player_width &&
+       float_of_int st.p1 <= st.ball_y &&
+       st.ball_y <= float_of_int (st.p1 + player_height)
+       (* left player collision *)
+    then
+      (* bounce *)
+      { st with ball_x = 2. *. player_width -. x';
+                ball_vr = -. st.ball_vr;
+                ball_vtheta =
+                  deviation (-. st.ball_vtheta)
+                    (float_of_int st.p1 -. st.ball_y);
+      }, false
+    else if x' < 0. then
+      (* P1 lost; reset the ball *)
+      st0 (), true
+    else if x' >= ncol -. player_width &&
+            float_of_int st.p2 <= st.ball_y &&
+            st.ball_y <= float_of_int (st.p2 + player_height)
+            (* right wall collision *)
+    then
+      (* bounce *)
+      { st with ball_x = 2. *. (ncol -. player_width) -. x' -. 1.;
+                ball_vr = -. st.ball_vr;
+                ball_vtheta =
+                  deviation (-. st.ball_vtheta)
+                    (float_of_int st.p2 -. st.ball_y);
+      }, false
+    else if x' >= ncol then
+      (* P2 lost; reset the ball *)
+      st0 (), true
+    else
+      (* continue *)
+      { st with ball_x = x' }, false
+  in
+  let%lwt () = if reset then Lwt_unix.sleep 1. else Lwt.return () in
+  Lwt.return { st with ball_vr = st.ball_vr *. 1.001; }
 
 (* Ball with manual "anti-aliasing"
   . X .
   X X X
   . X .
 *)
-let ball x y : Screen.image =
-  (* let (r, g, b) = Screen.get_rgb ((tick * 5) mod 0xFFFFFF) in *)
-  let r, g, b = Screen.get_rgb 0xFFFFFF in
-  let color = Screen.rgb ~r ~g ~b in
+let ball color x y : Screen.image =
+  let r, g, b = Screen.get_rgb color in
   let shade_level = 3 in
   let shade_color =
     Screen.rgb ~r:(r / shade_level) ~g:(g / shade_level) ~b:(b / shade_level)
@@ -109,6 +147,21 @@ let ball x y : Screen.image =
     px shade_color (x + 1) (y + 1);
   ]
 
+let trail st : Screen.image =
+  let rec list_map2 f l1 l2 =
+    match l1, l2 with
+    | x :: xs, y :: ys ->
+      f x y :: list_map2 f xs ys
+    | _, _ ->
+      []
+  in
+  list_map2 (fun (x, y) color ->
+    let r, g, b = Screen.get_rgb color in
+    let color = Screen.rgb ~r:(r / 2) ~g:(g / 2) ~b:(b / 2) in
+    ball color (int_of_float x) (int_of_float y)
+  ) st.trail trail_colors
+  |> Screen.superpose
+
 let players p1 p2 : Screen.image =
   Screen.of_rectangles [
     { color = Screen.rgb ~r:255 ~g:255 ~b:0;
@@ -119,7 +172,8 @@ let players p1 p2 : Screen.image =
 
 let draw conn st =
   Screen.superpose [
-    ball (int_of_float st.ball_x) (int_of_float st.ball_y);
+    trail st;
+    ball 0xFFFFFF (int_of_float st.ball_x) (int_of_float st.ball_y);
     players st.p1 st.p2;
   ] |> Screen.send_image conn
 
@@ -139,7 +193,8 @@ let apply_keys events st =
 let rec game_loop conn events st =
   let%lwt () = draw conn st in
   let%lwt () = Lwt_unix.sleep 0.025 in
-  let st' = apply_keys events st |> game_step in
+  let st' = apply_keys events st in
+  let%lwt st' = game_step st' in
   game_loop conn events st'
 
 let rec player_loop sock buf send_up send_down =
