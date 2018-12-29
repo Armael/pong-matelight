@@ -1,0 +1,5 @@
+(executables
+  (names test pong pong_client)
+  (libraries matelightlib lwt)
+  (preprocess (pps lwt_ppx))
+  (flags -safe-string))

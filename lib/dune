@@ -1,0 +1,4 @@
+(library
+  (name matelightlib)
+  (libraries lwt lwt.unix)
+  (preprocess (pps lwt_ppx)))
